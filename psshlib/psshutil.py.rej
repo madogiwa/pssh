@@ -1,0 +1,10 @@
+--- psshlib/psshutil.py
++++ psshlib/psshutil.py
+@@ -6,6 +6,7 @@ import glob
+ import string
+ import sys
+ import random
++import re
+ 
+ HOST_FORMAT = 'Host format is [user@]host[:port] [user]'
+ 

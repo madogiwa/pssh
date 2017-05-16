@@ -1,0 +1,22 @@
+diff --git a/psshlib/psshutil.py b/psshlib/psshutil.py
+index 24b15f7..db01360 100644
+--- a/psshlib/psshutil.py
++++ b/psshlib/psshutil.py
+@@ -6,6 +6,7 @@ import glob
+ import string
+ import sys
+ import random
++import re
+ 
+ HOST_FORMAT = 'Host format is [user@]host[:port] [user]'
+ 
+@@ -45,7 +46,8 @@ def read_host_file(path, default_user=None, default_port=None):
+ 
+     hosts = []
+     for line in lines:
+-        # Skip blank lines or lines starting with #
++        # Skip blank lines, trailing comments, or lines starting with #
++        line = re.sub('#.*', '', line)
+         line = line.strip()
+         if not line or line.startswith('#'):
+             continue

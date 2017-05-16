@@ -2,7 +2,6 @@
 # Copyright (c) 2003-2008, Brent N. Chun
 
 import fcntl
-import re
 import string
 import sys
 
@@ -35,8 +34,7 @@ def read_host_file(path, default_user=None, default_port=None):
 
     hosts = []
     for line in lines:
-        # Skip blank lines, trailing comments, or lines starting with #
-        line = re.sub('#.*', '', line)
+        # Skip blank lines or lines starting with #
         line = line.strip()
         if not line or line.startswith('#'):
             continue
@@ -107,8 +105,3 @@ def set_cloexec(filelike):
     not require the close_fds option.
     """
     fcntl.fcntl(filelike.fileno(), fcntl.FD_CLOEXEC, 1)
-
-def list_hosts(hosts):
-    for host in hosts:
-        print host
-
