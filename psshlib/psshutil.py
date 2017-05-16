@@ -107,3 +107,8 @@ def set_cloexec(filelike):
     not require the close_fds option.
     """
     fcntl.fcntl(filelike.fileno(), fcntl.FD_CLOEXEC, 1)
+
+def list_hosts(hosts):
+    for host in hosts:
+        print host
+
