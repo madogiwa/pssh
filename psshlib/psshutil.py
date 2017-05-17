@@ -5,11 +5,12 @@ import fcntl
 import re
 import string
 import sys
+import fnmatch
 
 HOST_FORMAT = 'Host format is [user@]host[:port] [user]'
 
 
-def read_host_files(paths, default_user=None, default_port=None):
+def read_host_files(paths, select_string, default_user=None, default_port=None):
     """Reads the given host files.
 
     Returns a list of (host, port, user) triples.
@@ -17,11 +18,11 @@ def read_host_files(paths, default_user=None, default_port=None):
     hosts = []
     if paths:
         for path in paths:
-            hosts.extend(read_host_file(path, default_user=default_user))
+            hosts.extend(read_host_file(path, select_string, default_user=default_user))
     return hosts
 
 
-def read_host_file(path, default_user=None, default_port=None):
+def read_host_file(path, select_string, default_user=None, default_port=None):
     """Reads the given host file.
 
     Lines are of the form: host[:port] [login].
@@ -40,15 +41,16 @@ def read_host_file(path, default_user=None, default_port=None):
         line = line.strip()
         if not line or line.startswith('#'):
             continue
-        host, port, user = parse_host_entry(line, default_user, default_port)
+        host, port, user = parse_host_entry(line, default_user, default_port, select_string)
         if host:
-            hosts.append((host, port, user))
+            if select_string and fnmatch.fnmatch(host, select_string):
+                hosts.append((host, port, user))
     return hosts
 
 
 # TODO: deprecate the second host field and standardize on the
 # [user@]host[:port] format.
-def parse_host_entry(line, default_user, default_port):
+def parse_host_entry(line, default_user, default_port, select_string):
     """Parses a single host entry.
 
     This may take either the of the form [user@]host[:port] or

@@ -53,8 +53,10 @@ def common_parser():
             'spaces, quotes, and backslashes')
     parser.add_option('-X', '--extra-arg', dest='extra', action='append',
             metavar='ARG', help='Extra command-line argument')
-    parser.add_option('--list-hosts', dest='list_hosts', action='store_true',
+    parser.add_option('-L', '--list-hosts', dest='list_hosts', action='store_true',
             help='List matched hosts then exit')
+    parser.add_option('-s', '--select', dest='select_string', type='string',
+            help='Select string (shell-style glob) to filter hosts (OPTIONAL)')
 
     return parser
 
