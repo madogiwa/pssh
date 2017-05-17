@@ -1,0 +1,402 @@
+#!/usr/bin/env python
+# -*- Mode: python -*-
+
+import os
+import sys
+
+parent, bindir = os.path.split(os.path.dirname(os.path.abspath(sys.argv[0])))
+if os.path.exists(os.path.join(parent, 'psshlib')):
+    sys.path.insert(0, parent)
+
+from psshlib import psshutil
+from psshlib.manager import Manager, FatalError
+from psshlib.task import Task
+from psshlib.cli import common_parser, common_defaults
+
+_DEFAULT_TIMEOUT = 60
+
+def parse_host_opts(opts):
+    try:
+        hosts = psshutil.read_host_files(opts.host_files, opts.select_string,
+            default_user=opts.user)
+    except IOError:
+        _, e, _ = sys.exc_info()
+        sys.stderr.write('Could not open hosts file: %s\n' % e.strerror)
+        sys.exit(1)
+    if opts.host_strings:
+        for s in opts.host_strings:
+            hosts.extend(psshutil.parse_host_string(s, default_user=opts.user))
+
+    return hosts
+
+
+def parse_args(parser):
+    """Common argument parsing
+    Returns: opts, args"""
+
+    defaults = common_defaults()
+    parser.set_defaults(**defaults)
+    opts, args = parser.parse_args()
+    
+    if not opts.host_files and not opts.host_strings:
+        parser.error('Hosts not specified.')
+
+    return opts, args
+
+
+def do_pscp():
+    parser = common_parser()
+    parser.usage = "%prog [OPTIONS] local remote"
+    parser.epilog = ("Example: pscp -h hosts.txt -l irb2 foo.txt " +
+            "/home/irb2/foo.txt")
+
+    parser.add_option('-r', '--recursive', dest='recursive',
+            action='store_true', help='recusively copy directories (OPTIONAL)')
+
+    opts, args = parse_args(parser)
+    hosts = parse_host_opts(opts)
+    localargs = args[0:-1]
+    remote = args[-1]
+
+    if len(args) < 1:
+        parser.error('Paths not specified.')
+
+    if len(args) < 2:
+        parser.error('Remote path not specified.')
+
+    if not opts.host_files and not opts.host_strings:
+        parser.error('Hosts not specified.')
+
+    if opts.outdir and not os.path.exists(opts.outdir):
+        os.makedirs(opts.outdir)
+    if opts.errdir and not os.path.exists(opts.errdir):
+        os.makedirs(opts.errdir)
+    manager = Manager(opts)
+    for host, port, user in hosts:
+        cmd = ['scp', '-qC']
+        if opts.options:
+            for opt in opts.options:
+                cmd += ['-o', opt]
+        if port:
+            cmd += ['-P', port]
+        if opts.recursive:
+            cmd.append('-r')
+        if opts.extra:
+            cmd.extend(opts.extra)
+        cmd.extend(localargs)
+        if user:
+            cmd.append('%s@%s:%s' % (user, host, remote))
+        else:
+            cmd.append('%s:%s' % (host, remote))
+        t = Task(host, port, user, cmd, opts)
+        manager.add_task(t)
+    try:
+        statuses = manager.run()
+    except FatalError:
+        sys.exit(1)
+
+    if statuses and min(statuses) < 0:
+        # At least one process was killed.
+        sys.exit(3)
+    for status in statuses:
+        if status != 0:
+            sys.exit(4)
+
+
+def do_pssh():
+    parser = common_parser()
+    parser.usage = "%prog [OPTIONS] command [...]"
+    parser.epilog = "Example: pssh -h hosts.txt -l irb2 -o /tmp/foo uptime"
+
+    parser.add_option('-i', '--inline', dest='inline', action='store_true',
+            help='inline aggregated output and error for each server')
+    parser.add_option('--inline-stdout', dest='inline_stdout',
+            action='store_true',
+            help='inline standard output for each server')
+    parser.add_option('-I', '--send-input', dest='send_input',
+            action='store_true',
+            help='read from standard input and send as input to ssh')
+    parser.add_option('-P', '--print', dest='print_out', action='store_true',
+            help='print output as we get it')
+
+    opts, args = parse_args(parser)
+    hosts = parse_host_opts(opts)
+
+    cmdline = " ".join(args)
+
+    if len(args) == 0 and not opts.send_input and not opts.list_hosts:
+        parser.error('Command not specified.')
+
+    if not opts.host_files and not opts.host_strings:
+        parser.error('Hosts not specified.')
+
+    if opts.outdir and not os.path.exists(opts.outdir):
+        os.makedirs(opts.outdir)
+    if opts.errdir and not os.path.exists(opts.errdir):
+        os.makedirs(opts.errdir)
+    if opts.send_input:
+        if hasattr(sys.stdin, 'buffer'):
+            stdin = sys.stdin.buffer.read()
+        else:
+            stdin = sys.stdin.read()
+    else:
+        stdin = None
+    manager = Manager(opts)
+    for host, port, user in hosts:
+        cmd = ['ssh', '-T', host, '-o', 'NumberOfPasswordPrompts=1',
+                '-o', 'SendEnv=PSSH_NODENUM PSSH_HOST']
+        if opts.options:
+            for opt in opts.options:
+                cmd += ['-o', opt]
+        if user:
+            cmd += ['-l', user]
+        if port:
+            cmd += ['-p', port]
+        if opts.extra:
+            cmd.extend(opts.extra)
+        if cmdline:
+            cmd.append(cmdline)
+        t = Task(host, port, user, cmd, opts, stdin)
+        manager.add_task(t)
+    try:
+        statuses = manager.run()
+    except FatalError:
+        sys.exit(1)
+
+    if statuses and min(statuses) < 0:
+        # At least one process was killed.
+        sys.exit(3)
+    if any(x == 255 for x in statuses):
+        sys.exit(4)
+    if any(x != 0 for x in statuses):
+        sys.exit(5)
+
+
+def do_pnuke():
+    parser = common_parser()
+    parser.usage = "%prog [OPTIONS] pattern"
+    parser.epilog = "Example: pnuke -h hosts.txt -l irb2 java"
+
+    opts, args = parse_args(parser)
+    hosts = parse_host_opts(opts)
+
+    if len(args) < 1:
+        parser.error('Pattern not specified.')
+
+    if len(args) > 1:
+        parser.error('Extra arguments given after the pattern.')
+
+    if not opts.host_files and not opts.host_strings:
+        parser.error('Hosts not specified.')
+    
+    pattern = args[0]
+
+    if opts.outdir and not os.path.exists(opts.outdir):
+        os.makedirs(opts.outdir)
+    if opts.errdir and not os.path.exists(opts.errdir):
+        os.makedirs(opts.errdir)
+    manager = Manager(opts)
+    for host, port, user in hosts:
+        cmd = ['ssh', host, '-o', 'NumberOfPasswordPrompts=1']
+        if opts.options:
+            for opt in opts.options:
+                cmd += ['-o', opt]
+        if user:
+            cmd += ['-l', user]
+        if port:
+            cmd += ['-p', port]
+        if opts.extra:
+            cmd.extend(opts.extra)
+        cmd.append('pkill -9 %s' % pattern)
+        t = Task(host, port, user, cmd, opts)
+        manager.add_task(t)
+    try:
+        statuses = manager.run()
+    except FatalError:
+        sys.exit(1)
+
+    if min(statuses) < 0:
+        # At least one process was killed.
+        sys.exit(3)
+    for status in statuses:
+        if status == 255:
+            sys.exit(4)
+    for status in statuses:
+        if status != 0:
+            sys.exit(5)
+
+def do_prsync():
+    parser = common_parser()
+    parser.usage = "%prog [OPTIONS] local remote"
+    parser.epilog = ("Example: prsync -r -h hosts.txt -l irb2 foo " +
+          "/home/irb2/foo")
+
+    parser.add_option('-r', '--recursive', dest='recursive',
+            action='store_true', help='recusively copy directories (OPTIONAL)')
+    parser.add_option('-a', '--archive', dest='archive', action='store_true',
+            help='use rsync -a (archive mode) (OPTIONAL)')
+    parser.add_option('-z', '--compress', dest='compress', action='store_true',
+            help='use rsync compression (OPTIONAL)')
+    parser.add_option('-S', '--ssh-args', metavar="ARGS", dest='ssh_args',
+            action='store', help='extra arguments for ssh')
+
+    opts, args = parse_args(parser)
+    hosts = parse_host_opts(opts)
+    
+    local = args[0:-1]
+    remote = args[-1]
+
+    if len(args) < 1:
+        parser.error('Paths not specified.')
+
+    if len(args) < 2:
+        parser.error('Remote path not specified.')
+
+    if not opts.host_files and not opts.host_strings:
+        parser.error('Hosts not specified.')
+
+    if opts.outdir and not os.path.exists(opts.outdir):
+        os.makedirs(opts.outdir)
+    if opts.errdir and not os.path.exists(opts.errdir):
+        os.makedirs(opts.errdir)
+
+    manager = Manager(opts)
+    for host, port, user in hosts:
+        ssh = ['ssh']
+        if opts.options:
+            for opt in opts.options:
+                ssh += ['-o', opt]
+        if port:
+            ssh += ['-p', port]
+        if opts.ssh_args:
+            ssh += [opts.ssh_args]
+
+        cmd = ['rsync', '-e', ' '.join(ssh)]
+        if opts.verbose:
+            cmd.append('-v')
+        if opts.recursive:
+            cmd.append('-r')
+        if opts.archive:
+            cmd.append('-a')
+        if opts.compress:
+            cmd.append('-z')
+        if opts.extra:
+            cmd.extend(opts.extra)
+        cmd.extend(local)
+        if user:
+            cmd.append('%s@%s:%s' % (user, host, remote))
+        else:
+            cmd.append('%s:%s' % (host, remote))
+        t = Task(host, port, user, cmd, opts)
+        manager.add_task(t)
+    try:
+        statuses = manager.run()
+    except FatalError:
+        sys.exit(1)
+
+    if min(statuses) < 0:
+        # At least one process was killed.
+        sys.exit(3)
+    for status in statuses:
+        if status != 0:
+            sys.exit(4)
+
+
+def do_pslurp():
+    parser = common_parser()
+    parser.usage = "%prog [OPTIONS] remote local"
+    parser.epilog = ("Example: pslurp -h hosts.txt -L /tmp/outdir -l irb2 " +
+            "         /home/irb2/foo.txt foo.txt")
+
+    parser.add_option('-r', '--recursive', dest='recursive',
+            action='store_true', help='recusively copy directories (OPTIONAL)')
+    parser.add_option('-L', '--localdir', dest='localdir',
+            help='output directory for remote file copies')
+    
+    opts, args = parse_args(parser)
+    hosts = parse_host_opts(opts)
+    
+    remote = args[0]
+    local = args[1]
+
+    if len(args) < 1:
+        parser.error('Paths not specified.')
+
+    if len(args) < 2:
+        parser.error('Local path not specified.')
+
+    if len(args) > 2:
+        parser.error('Extra arguments given after the local path.')
+
+    if not opts.host_files and not opts.host_strings:
+        parser.error('Hosts not specified.')
+
+    if opts.localdir and not os.path.exists(opts.localdir):
+        os.makedirs(opts.localdir)
+    if opts.outdir and not os.path.exists(opts.outdir):
+        os.makedirs(opts.outdir)
+    if opts.errdir and not os.path.exists(opts.errdir):
+        os.makedirs(opts.errdir)
+    for host, port, user in hosts:
+        if opts.localdir:
+            dirname = "%s/%s" % (opts.localdir, host)
+        else:
+            dirname = host
+        if not os.path.exists(dirname):
+            os.mkdir(dirname)
+    manager = Manager(opts)
+    for host, port, user in hosts:
+        if opts.localdir:
+            localpath = "%s/%s/%s" % (opts.localdir, host, local)
+        else:
+            localpath = "%s/%s" % (host, local)
+        cmd = ['scp', '-qC']
+        if opts.options:
+            for opt in opts.options:
+                cmd += ['-o', opt]
+        if port:
+            cmd += ['-P', port]
+        if opts.recursive:
+            cmd.append('-r')
+        if opts.extra:
+            cmd.extend(opts.extra)
+        if user:
+            cmd.append('%s@%s:%s' % (user, host, remote))
+        else:
+            cmd.append('%s:%s' % (host, remote))
+        cmd.append(localpath)
+        t = Task(host, port, user, cmd, opts)
+        manager.add_task(t)
+    try:
+        statuses = manager.run()
+    except FatalError:
+        sys.exit(1)
+
+    if min(statuses) < 0:
+        # At least one process was killed.
+        sys.exit(3)
+    for status in statuses:
+        if status == 255:
+            sys.exit(4)
+    for status in statuses:
+        if status != 0:
+            sys.exit(5)
+
+
+if __name__ == "__main__":
+    progname = os.path.basename(sys.argv[0])
+  
+    if progname == 'pssh':
+        do_pssh()
+    elif progname == 'pscp':
+        do_pscp()
+    elif progname == 'pnuke':
+        do_pnuke()
+    elif progname == 'pslurp':
+        do_pslurp()
+    elif progname == 'prsync':
+        do_prsync()
+    else:
+        sys.stderr.write("Unknown program name: %s\n" % progname)
+        sys.exit(1)
+
