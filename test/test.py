@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # Copyright (c) 2009, Andrew McNabb
 # Copyright (c) 2003-2008, Brent N. Chun
