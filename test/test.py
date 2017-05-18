@@ -59,10 +59,8 @@ class PsshTest(unittest.TestCase):
         hostsFile.flush()
         cmd = "%s/bin/pssh -h %s -l %s -p 64 -o %s -e %s -t 60 -v -P -i ls /doesnotexist < /dev/null" % (basedir, hostsFile.name, g_user, self.outDir, self.errDir)
         rv = subprocess.call(cmd, shell=True)
-        self.assertEqual(rv, 0)
+        self.assertEqual(rv, 5)
         for host in g_hosts:
-            stdout = open("%s/%s" % (self.outDir, host)).read()
-            self.assertEqual(stdout, "")
             stderr = open("%s/%s" % (self.errDir, host)).read()
             self.assert_(stderr.find("No such file or directory") != -1)
 
@@ -93,8 +91,9 @@ class PscpTest(unittest.TestCase):
         self.assertEqual(rv, 0)
         for host in g_hosts:
             cmd = "ssh %s@%s cat /tmp/pssh.test" % (g_user, host)
-            data = os.popen(cmd).read()
-            self.assertEqual(data, open("/etc/hosts").read())
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (out, err) = proc.communicate()
+            self.assertEqual(out, open("/etc/hosts").read())
 
     def testLongOpts(self):
         for host in g_hosts:
@@ -110,8 +109,9 @@ class PscpTest(unittest.TestCase):
         self.assertEqual(rv, 0)
         for host in g_hosts:
             cmd = "ssh %s@%s cat /tmp/pssh.test" % (g_user, host)
-            data = os.popen(cmd).read()
-            self.assertEqual(data, open("/etc/hosts").read())
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (out, err) = proc.communicate()
+            self.assertEqual(out, open("/etc/hosts").read())
 
     def testRecursive(self):
         for host in g_hosts:
@@ -122,14 +122,16 @@ class PscpTest(unittest.TestCase):
         hostsFile = tempfile.NamedTemporaryFile()
         hostsFile.write("".join(map(lambda x: "%s\n" % x, g_hosts)))
         hostsFile.flush()
-        cmd = "%s/bin/pscp -r -h %s -l %s -p 64 -o %s -e %s -t 60 /etc/init.d /tmp/pssh.test < /dev/null" % (basedir, hostsFile.name, g_user, self.outDir, self.errDir)
+        cmd = "%s/bin/pscp -r -h %s -l %s -p 64 -o %s -e %s -t 60 %s/test/test_dir /tmp/pssh.test < /dev/null" % (basedir, hostsFile.name, g_user, self.outDir, self.errDir, basedir)
         rv = subprocess.call(cmd, shell=True)
         self.assertEqual(rv, 0)
-        files = os.popen("ls -R /etc/init.d | sed 1d | sort").read().strip()
+        proc = subprocess.Popen("ls -R %s/test/test_dir | sed -e 's|%s/test/test_dir||' | sort" % (basedir, basedir), stdout=subprocess.PIPE, shell=True)
+        (files, err) = proc.communicate()
         for host in g_hosts:
-            cmd = "ssh %s@%s ls -R /tmp/pssh.test | sed 1d | sort" % (g_user, host)
-            data = os.popen(cmd).read().strip()
-            self.assertEqual(data, files)
+            cmd = "ssh %s@%s ls -R /tmp/pssh.test | sed -e 's|/tmp/pssh.test||' | sort" % (g_user, host)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (out, err) = proc.communicate()
+            self.assertEqual(out.strip(), files.strip())
 
 class PslurpTest(unittest.TestCase):
     def setUp(self):
@@ -156,8 +158,9 @@ class PslurpTest(unittest.TestCase):
 
         for host in g_hosts:
             cmd = "ssh %s@%s cat /etc/hosts" % (g_user, host)
-            data = os.popen(cmd).read()
-            self.assertEqual(data, open("/tmp/pssh.test/%s/hosts" % host).read())
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (out, err) = proc.communicate()
+            self.assertEqual(out, open("/tmp/pssh.test/%s/hosts" % host).read())
 
     def testLongOpts(self):
         if os.path.exists("/tmp/pssh.test"):
@@ -175,8 +178,9 @@ class PslurpTest(unittest.TestCase):
 
         for host in g_hosts:
             cmd = "ssh %s@%s cat /etc/hosts" % (g_user, host)
-            data = os.popen(cmd).read()
-            self.assertEqual(data, open("/tmp/pssh.test/%s/hosts" % host).read())
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (out, err) = proc.communicate()
+            self.assertEqual(out, open("/tmp/pssh.test/%s/hosts" % host).read())
 
     def testRecursive(self):
         if os.path.exists("/tmp/pssh.test"):
@@ -194,8 +198,14 @@ class PslurpTest(unittest.TestCase):
 
         for host in g_hosts:
             cmd = "ssh %s@%s ls -R /etc/init.d | sed 1d | sort" % (g_user, host)
-            data = os.popen(cmd).read()
-            self.assertEqual(data, os.popen("ls -R /tmp/pssh.test/%s/init.d | sed 1d | sort" % host).read())
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (remoteout, err) = proc.communicate(cmd)
+
+            cmd = "ls -R /tmp/pssh.test/%s/init.d | sed 1d | sort" % host
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (localout, err) = proc.communicate(cmd)
+
+            self.assertEqual(remoteout, localout)
 
 class PrsyncTest(unittest.TestCase):
     def setUp(self):
@@ -220,8 +230,9 @@ class PrsyncTest(unittest.TestCase):
         self.assertEqual(rv, 0)
         for host in g_hosts:
             cmd = "ssh %s@%s cat /tmp/pssh.test" % (g_user, host)
-            data = os.popen(cmd).read()
-            self.assertEqual(data, open("/etc/hosts").read())
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (out, err) = proc.communicate(cmd)
+            self.assertEqual(out, open("/etc/hosts").read())
 
     def testLongOpts(self):
         for host in g_hosts:
@@ -237,8 +248,9 @@ class PrsyncTest(unittest.TestCase):
         self.assertEqual(rv, 0)
         for host in g_hosts:
             cmd = "ssh %s@%s cat /tmp/pssh.test" % (g_user, host)
-            data = os.popen(cmd).read()
-            self.assertEqual(data, open("/etc/hosts").read())
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (out, err) = proc.communicate(cmd)
+            self.assertEqual(out, open("/etc/hosts").read())
 
     def testRecursive(self):
         for host in g_hosts:
@@ -249,14 +261,17 @@ class PrsyncTest(unittest.TestCase):
         hostsFile = tempfile.NamedTemporaryFile()
         hostsFile.write("".join(map(lambda x: "%s\n" % x, g_hosts)))
         hostsFile.flush()
-        cmd = "%s/bin/prsync -r -h %s -l %s -p 64 -o %s -e %s -t 60 -a -z /etc/init.d/ /tmp/pssh.test < /dev/null" % (basedir, hostsFile.name, g_user, self.outDir, self.errDir)
+        cmd = "%s/bin/prsync -r -h %s -l %s -p 64 -o %s -e %s -t 60 -a -z %s/test/test_dir/ /tmp/pssh.test/ < /dev/null" % (basedir, hostsFile.name, g_user, self.outDir, self.errDir, basedir)
         rv = subprocess.call(cmd, shell=True)
         self.assertEqual(rv, 0)
-        files = os.popen("ls -R /etc/init.d | sed 1d | sort").read().strip()
+        cmd = "ls -R %s/test/test_dir | sed -e 's|%s/test/test_dir||' | sort" % (basedir, basedir)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+        (localout, err) = proc.communicate(cmd)
         for host in g_hosts:
-            cmd = "ssh %s@%s ls -R /tmp/pssh.test | sed 1d | sort" % (g_user, host)
-            data = os.popen(cmd).read().strip()
-            self.assertEqual(data, files)
+            cmd = "ssh %s@%s ls -R /tmp/pssh.test | sed -e 's|/tmp/pssh.test||' | sort" % (g_user, host)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+            (remoteout, err) = proc.communicate(cmd)
+            self.assertEqual(localout, remoteout)
 
 class PnukeTest(unittest.TestCase):
     def setUp(self):
