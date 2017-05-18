@@ -43,7 +43,7 @@ def read_host_file(path, select_string, default_user=None, default_port=None):
             continue
         host, port, user = parse_host_entry(line, default_user, default_port, select_string)
         if host:
-            if select_string and fnmatch.fnmatch(host, select_string):
+            if (select_string and fnmatch.fnmatch(host, select_string)) or not select_string:
                 hosts.append((host, port, user))
     return hosts
 
