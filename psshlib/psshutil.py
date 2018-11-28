@@ -112,5 +112,5 @@ def set_cloexec(filelike):
 
 def list_hosts(hosts):
     for host in hosts:
-        print host
+        print(host)
 
